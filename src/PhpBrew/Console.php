@@ -14,7 +14,7 @@ use PhpBrew\Exception\SystemCommandException;
 class Console extends Application
 {
     const NAME = 'phpbrew';
-    const VERSION = '1.28.0';
+    const VERSION = '2.2.0';
 
     public function options($opts)
     {
@@ -128,7 +128,7 @@ class Console extends Application
             $buildLog = $e->getLogFile();
             $this->logger->error('Error: ' . trim($e->getMessage()));
 
-            if (file_exists($buildLog)) {
+            if ($buildLog !== null && file_exists($buildLog)) {
                 $this->logger->error('The last 5 lines in the log file:');
                 $lines = array_slice(file($buildLog), -5);
                 foreach ($lines as $line) {

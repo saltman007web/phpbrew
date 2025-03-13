@@ -161,7 +161,13 @@ class VariantBuilder
             return $params->withOption('--enable-zts');
         };
 
-        $this->variants['json'] = '--enable-json';
+        $this->variants['json'] = function (ConfigureParameters $params, Build $build) {
+            if ($build->compareVersion('8.0') < 0) {
+                return $params->withOption('--enable-json');
+            }
+
+            return $params;
+        };
         $this->variants['hash'] = '--enable-hash';
         $this->variants['exif'] = '--enable-exif';
 
@@ -269,6 +275,24 @@ class VariantBuilder
         };
 
         $this->variants['pcre'] = function (ConfigureParameters $params, Build $build, $value) {
+            // Apple Silicon will crash on < 8.1.11 due to the bundled PCRE2 not being compatible with Apple Sillicon, so get an updated version if we can
+            // PHP 8.1.11 and above have the fix applied to its bundled PCRE2: https://github.com/php/php-src/commit/f8b217a3452e76113b833eec8a49bc2b6e8d1fdd
+            if ($build->compareVersion('8.0') >= 0 && $build->compareVersion('8.1.11') < 0 && $build->osName === 'Darwin' && $build->osArch === 'arm64') {
+                $prefix = Utils::findPrefix([
+                    new UserProvidedPrefix($value),
+                    new IncludePrefixFinder('pcre2.h'),
+                    new BrewPrefixFinder('pcre2'),
+                ]);
+
+                if ($prefix === null) {
+                    throw new Exception('Unable to find PCRE2 library. PHP 8.0 on Apple Silicon requires a newer version of PCRE2 than is bundled with PHP 8.0.');
+                }
+
+                $params = $params->withOption('--with-external-pcre', $prefix);
+                return $params;
+            }
+
+            // PCRE is bundled with PHP since 7.4
             if ($build->compareVersion('7.4') >= 0) {
                 return $params;
             }
@@ -767,6 +791,28 @@ class VariantBuilder
             return $parameters->withOption('--with-pear', $value);
         };
 
+        /*
+         * --with-snmp option
+         *
+         * --with-snmp=[dir]
+         *
+         * On macOS, you need to use the brew to install the net-snmp
+         *
+         * On ubuntu you need to install libsnmp-dev
+         * On Ubuntu 18.04+, it should ensure the /usr/include/net-snmp/net-snmp-config.h is available.
+         * On Ubuntu 22.04+, it should ensure the pkg-config --variable=prefix netsnmp can find the net-snmp prefix.
+         */
+        $this->variants['snmp'] = function (ConfigureParameters $parameters, Build $build, $value) {
+            $prefix = Utils::findPrefix(array(
+                new UserProvidedPrefix($value),
+                new BrewPrefixFinder('net-snmp'),
+                new PkgConfigPrefixFinder('netsnmp'),
+                new IncludePrefixFinder('net-snmp/net-snmp-config.h'),
+            ));
+
+            return $parameters->withOptionOrPkgConfigPath($build, '--with-snmp', $prefix);
+        };
+
         // merge virtual variants with config file
         $customVirtualVariants = Config::getConfigParam('variants');
         $customVirtualVariantsToAdd = array();
@@ -819,7 +865,7 @@ class VariantBuilder
                     $build->disableVariant($c);
                 }
 
-                echo implode("\n", $msgs) . "\n";
+                echo implode(PHP_EOL, $msgs) . PHP_EOL;
             }
         }
 
